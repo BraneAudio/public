@@ -1,15 +1,14 @@
-# public
-
-ffmpeg_v4.2.1_cache-redirect.patch
+# ffmpeg_v4.2.1_cache-redirect.patch
 It is possible to get hls playlists whose contents are redirected.  When this happens ffmpeg
 is closing and opening at least two urls every segment duration.  This can make the stream
 stutter and fail due to the extra overhead.  This patch modifies ffmpeg to cache one redirect
 connection which it will use as needed.
 
-ffmpeg_v4.2.1_sample-aes.patch
+# ffmpeg_v4.2.1_sample-aes.patch
 This patch adds support for sample-aes encrypted hls streams.  Audio and video streams are
 supported but only audio streams have been tested.
 
+# Build
 Both of these patches are for the ffmpeg v4.2.1 release using the following configure args:
 
 ./configure \
