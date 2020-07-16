@@ -1,0 +1,114 @@
+diff --git a/libavformat/http.c b/libavformat/http.c
+index 579debcd35..ddb8d4493d 100644
+--- a/libavformat/http.c
++++ b/libavformat/http.c
+@@ -126,6 +126,8 @@ typedef struct HTTPContext {
+     int is_multi_client;
+     HandshakeState handshake_step;
+     int is_connected_server;
++    URLContext *redirected_hd;
++    char *redirected_location;
+ } HTTPContext;
+ 
+ #define OFFSET(x) offsetof(HTTPContext, x)
+@@ -254,6 +256,9 @@ static int http_open_cnx(URLContext *h, AVDictionary **options)
+     HTTPAuthType cur_auth_type, cur_proxy_auth_type;
+     HTTPContext *s = h->priv_data;
+     int location_changed, attempts = 0, redirects = 0;
++    int once=1;
++    char *old_location = strdup(s->location);
++
+ redo:
+     av_dict_copy(options, s->chained_options, 0);
+ 
+@@ -284,8 +289,28 @@ redo:
+     if ((s->http_code == 301 || s->http_code == 302 ||
+          s->http_code == 303 || s->http_code == 307) &&
+         location_changed == 1) {
+-        /* url moved, get next */
+-        ffurl_closep(&s->hd);
++
++        if(once == 0) {
++            /* url moved, get next */
++            ffurl_closep(&s->hd);
++
++            // more than one redirect is not supported by this cache
++            if(s->redirected_hd)
++                ffurl_closep(&s->redirected_hd);
++            if(s->redirected_location) {
++                av_free(s->redirected_location);
++                s->redirected_location=NULL;
++            }
++        } else {
++            once = 0;
++            FFSWAP(URLContext *, s->hd, s->redirected_hd);
++            FFSWAP(char *, s->redirected_location, old_location);
++            if(old_location) {
++                av_free(old_location);
++                old_location = NULL;
++            }
++        }
++
+         if (redirects++ >= MAX_REDIRECTS)
+             return AVERROR(EIO);
+         /* Restart the authentication process with the new target, which
+@@ -295,9 +320,14 @@ redo:
+         location_changed = 0;
+         goto redo;
+     }
++    if(old_location) av_free(old_location);
+     return 0;
+ 
+ fail:
++    if(old_location)
++        av_free(old_location);
++    if(s->redirected_hd)
++        ffurl_closep(&s->redirected_hd);
+     if (s->hd)
+         ffurl_closep(&s->hd);
+     if (location_changed < 0)
+@@ -313,11 +343,15 @@ int ff_http_do_new_request(URLContext *h, const char *uri)
+     char hostname1[1024], hostname2[1024], proto1[10], proto2[10];
+     int port1, port2;
+ 
++    // BRANE: redirect cache support
++    int once = 1;
++
+     if (!h->prot ||
+         !(!strcmp(h->prot->name, "http") ||
+           !strcmp(h->prot->name, "https")))
+         return AVERROR(EINVAL);
+ 
++again:
+     av_url_split(proto1, sizeof(proto1), NULL, 0,
+                  hostname1, sizeof(hostname1), &port1,
+                  NULL, 0, s->location);
+@@ -325,6 +359,13 @@ int ff_http_do_new_request(URLContext *h, const char *uri)
+                  hostname2, sizeof(hostname2), &port2,
+                  NULL, 0, uri);
+     if (port1 != port2 || strncmp(hostname1, hostname2, sizeof(hostname2)) != 0) {
++
++        if(s->redirected_hd && s->redirected_location) {
++            FFSWAP(URLContext *, s->hd, s->redirected_hd);
++            FFSWAP(char *, s->location, s->redirected_location);
++            if(once) { once=0; goto again; }
++        }
++
+         av_log(h, AV_LOG_ERROR, "Cannot reuse HTTP connection for different host: %s:%d != %s:%d\n",
+             hostname1, port1,
+             hostname2, port2
+@@ -1665,6 +1706,14 @@ static int http_close(URLContext *h)
+     if (s->hd)
+         ffurl_closep(&s->hd);
+     av_dict_free(&s->chained_options);
++
++    if(s->redirected_hd)
++        ffurl_closep(&s->redirected_hd);
++    if(s->redirected_location) {
++        av_free(s->redirected_location);
++        s->redirected_location = NULL;
++    }
++
+     return ret;
+ }
+ 

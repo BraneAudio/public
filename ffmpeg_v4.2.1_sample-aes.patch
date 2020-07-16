@@ -1,0 +1,140 @@
+diff --git a/libavformat/avformat.h b/libavformat/avformat.h
+index 6eb329f13f..6d2ef9df5a 100644
+--- a/libavformat/avformat.h
++++ b/libavformat/avformat.h
+@@ -1951,6 +1951,16 @@ typedef struct AVFormatContext {
+      * - decoding: set by user
+      */
+     int skip_estimate_duration_from_pts;
++
++    /**
++     * sample aes key and initialization vector.
++     * - set in libavformat/hls.c
++     * - use in libavformat/mov.c
++     */
++    uint8_t sample_aes_key[16];
++    uint8_t sample_aes_iv[16];
++    int32_t sample_aes_ena;
++
+ } AVFormatContext;
+ 
+ #if FF_API_FORMAT_GET_SET
+diff --git a/libavformat/hls.c b/libavformat/hls.c
+index 8c12fcef77..392a5ebc61 100644
+--- a/libavformat/hls.c
++++ b/libavformat/hls.c
+@@ -1236,9 +1236,29 @@ static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg,
+         }
+         ret = 0;
+     } else if (seg->key_type == KEY_SAMPLE_AES) {
+-        av_log(pls->parent, AV_LOG_ERROR,
+-               "SAMPLE-AES encryption is not supported yet\n");
+-        ret = AVERROR_PATCHWELCOME;
++        if (strcmp(seg->key, pls->key_url)) {
++            AVIOContext *pb = NULL;
++            if ((ret = open_url(pls->parent, &pb, seg->key, c->avio_opts, NULL, NULL)) == 0) {
++                ret = avio_read(pb, pls->key, sizeof(pls->key));
++                if (ret != sizeof(pls->key)) {
++                    av_log(NULL, AV_LOG_ERROR, "Unable to read key file %s\n",
++                        seg->key);
++                }
++                ff_format_io_close(pls->parent, &pb);
++            } else {
++                av_log(NULL, AV_LOG_ERROR, "Unable to open key file %s\n",
++                    seg->key);
++            }
++
++            // only get the sample-aes key once per stream
++            av_strlcpy(pls->key_url, seg->key, sizeof(pls->key_url));
++
++            // store the key/iv for use in libavformat/mov.c
++            pls->ctx->sample_aes_ena = 1;
++            memcpy(pls->ctx->sample_aes_key, pls->key, sizeof(pls->ctx->sample_aes_key));
++            memcpy(pls->ctx->sample_aes_iv,  seg->iv,  sizeof(pls->ctx->sample_aes_iv));
++        }
++        ret = open_url(pls->parent, in, seg->url, c->avio_opts, opts, &is_http);
+     }
+     else
+       ret = AVERROR(ENOSYS);
+diff --git a/libavformat/mov.c b/libavformat/mov.c
+index 327a25bbdf..6587bcce8e 100644
+--- a/libavformat/mov.c
++++ b/libavformat/mov.c
+@@ -34,6 +34,7 @@
+ #include "libavutil/intfloat.h"
+ #include "libavutil/mathematics.h"
+ #include "libavutil/time_internal.h"
++#include "libavutil/aes.h"
+ #include "libavutil/avassert.h"
+ #include "libavutil/avstring.h"
+ #include "libavutil/dict.h"
+@@ -7681,6 +7682,55 @@ static int mov_change_extradata(MOVStreamContext *sc, AVPacket *pkt)
+     return 0;
+ }
+ 
++static void sample_aes_decrypt(AVFormatContext *fc, uint8_t *data,
++                               size_t dat_size, uint8_t *key, uint8_t *iv,
++                               enum AVMediaType type)
++{
++    uint8_t *pu8 = data;
++    size_t rsize = dat_size; // remainder byte count
++    size_t dsize;            // decrypt byte count
++    size_t msize;            // max consume byte count
++    size_t csize;            // consume byte count
++    uint8_t local_iv[AES_CTR_KEY_SIZE];
++    struct AVAES *hdl = av_aes_alloc();
++    if(NULL == hdl) {
++        av_log(fc, AV_LOG_ERROR, "Failed to allocate struct AVAES\n");
++        goto exit;
++    }
++
++    // sample-aes reloads the iv for every packet so copy to a local buffer
++    // since av_aes_crypt overwrites the iv.
++    memcpy(&local_iv[0], iv, AES_CTR_KEY_SIZE);
++    if( av_aes_init(hdl, key, AES_CTR_KEY_SIZE*8, 1) ) {
++        av_log(fc, AV_LOG_ERROR, "Failed to initialize struct AVAES\n");
++        goto exit;
++    }
++
++    switch(type) {
++        case AVMEDIA_TYPE_VIDEO:
++            dsize = AES_CTR_KEY_SIZE;
++            msize = 160;
++            break;
++        case AVMEDIA_TYPE_AUDIO:
++            dsize = dat_size - (dat_size % AES_CTR_KEY_SIZE);
++            msize = dsize;
++            break;
++        default:
++            goto exit;
++    }
++
++    while(rsize >= AES_CTR_KEY_SIZE) {
++        av_aes_crypt(hdl, pu8, pu8, dsize >> 4, &local_iv[0], 1);
++        csize = (dsize > msize) ? msize : dsize;
++        pu8   += csize;
++        rsize -= csize;
++    }
++
++exit:
++    if(hdl) free(hdl);
++    return;
++}
++
+ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
+ {
+     MOVContext *mov = s->priv_data;
+@@ -7732,6 +7782,13 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
+             }
+             return ret;
+         }
++
++        if(s->sample_aes_ena) {
++            sample_aes_decrypt(mov->fc, pkt->data, pkt->size,
++                (uint8_t*)&s->sample_aes_key, (uint8_t*)&s->sample_aes_iv,
++                st->codecpar->codec_type);
++        }
++
+         if (sc->has_palette) {
+             uint8_t *pal;
+ 
