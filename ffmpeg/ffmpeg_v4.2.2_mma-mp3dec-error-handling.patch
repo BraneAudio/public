@@ -1,0 +1,13 @@
+diff --git a/libavformat/mp3dec.c b/libavformat/mp3dec.c
+index 68484156577..f4bb86adb21 100644
+--- a/libavformat/mp3dec.c
++++ b/libavformat/mp3dec.c
+@@ -158,7 +158,7 @@ static void mp3_parse_info_tag(AVFormatContext *s, AVStream *st,
+ 
+     MP3DecContext *mp3 = s->priv_data;
+     static const int64_t xing_offtbl[2][2] = {{32, 17}, {17,9}};
+-    uint64_t fsize = avio_size(s->pb);
++    int64_t fsize = avio_size(s->pb); // BRANE: was uint64_t
+     fsize = fsize >= avio_tell(s->pb) ? fsize - avio_tell(s->pb) : 0;
+ 
+     /* Check for Xing / Info tag */

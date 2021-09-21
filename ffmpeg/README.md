@@ -1,15 +1,29 @@
+# ffmpeg_v4.2.2_expanded-http-header-support.patch
+Added for avs audio player v1.5; supports adding separate custon http headers
+for fetching manifests, decryption keys, and audio segments.  DOES NOT include
+patching for the sample-aes support in a previous patch but is easily added.
+
+# ffmpeg_v4.2.2_mma-ignore-http-416.patch
+Ignore http 416 under specific conditions to avoid a problem with aac-lc audio
+served by media monkey android.
+
+# ffmpeg_v4.2.2_mma-mp3dec-error-handling.patch
+Changed a uint64_t to an int64_t for error return value parsing.  Fixed an error
+rendering mp3 audio from media monkey android.
+
 # ffmpeg_v4.2.1_cache-redirect.patch
-It is possible to get hls playlists whose contents are redirected.  When this happens ffmpeg
-is closing and opening at least two urls every segment duration.  This can make the stream
-stutter and fail due to the extra overhead.  This patch modifies ffmpeg to cache one redirect
-connection which it will use as needed.
+It is possible to get hls playlists whose contents are redirected.  When this
+happens ffmpeg is closing and opening at least two urls every segment duration.
+This can make the stream stutter and fail due to the extra overhead.  This patch
+modifies ffmpeg to cache one redirect connection which it will use as needed.
 
 # ffmpeg_v4.2.1_sample-aes.patch
-This patch adds support for sample-aes encrypted hls streams.  Audio and video streams are
-supported but only audio streams have been tested.
+This patch adds support for sample-aes encrypted hls streams.  Audio and video
+streams are supported but only audio streams have been tested.
 
 # Build
-Both of these patches are for the ffmpeg v4.2.1 release using the following configure args:
+Patches include the ffmpeg release in their name.  Currently the same config is
+used for all versions of ffmpeg.  Configure ffmpeg with the following args:
 
 ./configure \
 --disable-stripping \

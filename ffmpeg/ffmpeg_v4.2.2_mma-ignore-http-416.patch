@@ -1,0 +1,19 @@
+diff --git a/libavformat/http.c b/libavformat/http.c
+index 579debcd35..0e18e52638 100644
+--- a/libavformat/http.c
++++ b/libavformat/http.c
+@@ -635,6 +635,14 @@ static int check_http_code(URLContext *h, int http_code, const char *end)
+         (http_code != 401 || s->auth_state.auth_type != HTTP_AUTH_NONE) &&
+         (http_code != 407 || s->proxy_auth_state.auth_type != HTTP_AUTH_NONE)) {
+         end += strspn(end, SPACE_CHARS);
++        // BRANE: found that with media monkey android we would get http 416
++        //        when trying to stream mov audio [aac-lc] which would prevent
++        //        audio from paying.  limited this ignore to when the offset
++        //        is zero to limit its impact on libavformat behavior.
++        if( (s->off==0) && (http_code==416) ) {
++            av_log(h, AV_LOG_WARNING, "Ignoring HTTP error %d %s\n", http_code, end);
++            return 0;
++        }
+         av_log(h, AV_LOG_WARNING, "HTTP error %d %s\n", http_code, end);
+         return ff_http_averror(http_code, AVERROR(EIO));
+     }

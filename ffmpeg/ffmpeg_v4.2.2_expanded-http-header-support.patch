@@ -1,0 +1,98 @@
+diff --git a/libavformat/hls.c b/libavformat/hls.c
+index 8c12fcef77..e3aa5d1b0e 100644
+--- a/libavformat/hls.c
++++ b/libavformat/hls.c
+@@ -1201,10 +1201,12 @@ static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg,
+            seg->url, seg->url_offset, pls->index);
+ 
+     if (seg->key_type == KEY_NONE) {
++        av_dict_set_int(&opts, "brane_header_ena_segment", 1, 0); // BRANE: expanded http header support
+         ret = open_url(pls->parent, in, seg->url, c->avio_opts, opts, &is_http);
+     } else if (seg->key_type == KEY_AES_128) {
+         char iv[33], key[33], url[MAX_URL_SIZE];
+         if (strcmp(seg->key, pls->key_url)) {
++            av_dict_set_int(&opts, "brane_header_ena_dec_key", 1, 0); // BRANE: expanded http header support
+             AVIOContext *pb = NULL;
+             if (open_url(pls->parent, &pb, seg->key, c->avio_opts, opts, NULL) == 0) {
+                 ret = avio_read(pb, pls->key, sizeof(pls->key));
+@@ -1230,6 +1232,8 @@ static int open_input(HLSContext *c, struct playlist *pls, struct segment *seg,
+         av_dict_set(&opts, "key", key, 0);
+         av_dict_set(&opts, "iv", iv, 0);
+ 
++        av_dict_set_int(&opts, "brane_header_ena_dec_key", 0, 0); // BRANE: expanded http header support
++        av_dict_set_int(&opts, "brane_header_ena_segment", 1, 0);
+         ret = open_url(pls->parent, in, url, c->avio_opts, opts, &is_http);
+         if (ret < 0) {
+             goto cleanup;
+@@ -1650,7 +1654,8 @@ static int select_cur_seq_no(HLSContext *c, struct playlist *pls)
+ static int save_avio_options(AVFormatContext *s)
+ {
+     HLSContext *c = s->priv_data;
+-    static const char * const opts[] = {
++    static const char * const opts[] = { // BRANE: expanded http header support
++        "brane_header_manifest", "brane_header_dec_key", "brane_header_segment",
+         "headers", "http_proxy", "user_agent", "cookies", "referer", "rw_timeout", NULL };
+     const char * const * opt = opts;
+     uint8_t *buf;
+diff --git a/libavformat/http.c b/libavformat/http.c
+index 579debcd35..496342a7c1 100644
+--- a/libavformat/http.c
++++ b/libavformat/http.c
+@@ -126,6 +126,13 @@ typedef struct HTTPContext {
+     int is_multi_client;
+     HandshakeState handshake_step;
+     int is_connected_server;
++
++    // BRANE: expanded http header support
++    char *brane_header_manifest;
++    char *brane_header_dec_key;
++    char *brane_header_segment;
++    int brane_header_ena_dec_key;
++    int brane_header_ena_segment;
+ } HTTPContext;
+ 
+ #define OFFSET(x) offsetof(HTTPContext, x)
+@@ -168,6 +175,14 @@ static const AVOption options[] = {
+     { "listen", "listen on HTTP", OFFSET(listen), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 2, D | E },
+     { "resource", "The resource requested by a client", OFFSET(resource), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, E },
+     { "reply_code", "The http status code to return to a client", OFFSET(reply_code), AV_OPT_TYPE_INT, { .i64 = 200}, INT_MIN, 599, E},
++
++    // BRANE: expanded http header support
++    { "brane_header_manifest",    "custom HTTP headers for manifests",       OFFSET(brane_header_manifest),    AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D },
++    { "brane_header_dec_key",     "custom HTTP headers for decryption keys", OFFSET(brane_header_dec_key),     AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D },
++    { "brane_header_segment",     "custom HTTP headers for audio segments",  OFFSET(brane_header_segment),     AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D },
++    { "brane_header_ena_dec_key", "internal use only",                       OFFSET(brane_header_ena_dec_key), AV_OPT_TYPE_BOOL,   { .i64 = 0 },    0, 1, D },
++    { "brane_header_ena_segment", "internal use only",                       OFFSET(brane_header_ena_segment), AV_OPT_TYPE_BOOL,   { .i64 = 0 },    0, 1, D },
++
+     { NULL }
+ };
+ 
+@@ -1262,6 +1277,28 @@ static int http_connect(URLContext *h, const char *path, const char *local_path,
+         len += av_strlcatf(headers + len, sizeof(headers) - len,
+                            "Icy-MetaData: %d\r\n", 1);
+ 
++    // BRANE: expanded http header support
++    // libavformat/hls.c will set/clear brane_header_ena_* to indicate the type
++    // of http transaction that is occurring (manifest, decryption keys, audio
++    // segment).  Note that there is no specific enable for the manifest.
++    // Rather, the absense of either other enable defaults to a manifest.  This
++    // is because the hls module appears to be selected -after- the manifest
++    // has been retrieved (e.g. after the probe).  Rather than muck up more of
++    // the code to track when the manifest is fetched I've chosen to default to
++    // the manifest if neither the decrypt key or audio segment is selected.
++    if(s->brane_header_manifest && !s->brane_header_ena_dec_key
++                                && !s->brane_header_ena_segment)
++        len += av_strlcatf(headers + len, sizeof(headers) - len,
++                           "%s\r\n", s->brane_header_manifest);
++
++    if(s->brane_header_dec_key && s->brane_header_ena_dec_key)
++        len += av_strlcatf(headers + len, sizeof(headers) - len,
++                           "%s\r\n", s->brane_header_dec_key);
++
++    if(s->brane_header_segment && s->brane_header_ena_segment)
++        len += av_strlcatf(headers + len, sizeof(headers) - len,
++                           "%s\r\n", s->brane_header_segment);
++
+     /* now add in custom headers */
+     if (s->headers)
+         av_strlcpy(headers + len, s->headers, sizeof(headers) - len);
