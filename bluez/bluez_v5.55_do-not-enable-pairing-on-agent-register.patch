@@ -1,0 +1,23 @@
+diff --git a/src/adapter.c b/src/adapter.c
+index 1435e2bd7..97dd4c72b 100644
+--- a/src/adapter.c
++++ b/src/adapter.c
+@@ -8367,6 +8367,10 @@ int adapter_set_io_capability(struct btd_adapter *adapter, uint8_t io_cap)
+ {
+ 	struct mgmt_cp_set_io_capability cp;
+ 
++#if 0
++	// BRANE: added in commit 1880b299086659844889cdaf687133aca5eaf102
++	//        has side effect of enabling pairing when the agent is registered.
++	//        supposed to be part of the AlwaysPairable main.conf option.
+ 	if (!main_opts.pairable) {
+ 		if (io_cap == IO_CAPABILITY_INVALID) {
+ 			if (adapter->current_settings & MGMT_SETTING_BONDABLE)
+@@ -8379,6 +8383,7 @@ int adapter_set_io_capability(struct btd_adapter *adapter, uint8_t io_cap)
+ 			set_mode(adapter, MGMT_OP_SET_BONDABLE, 0x01);
+ 	} else if (io_cap == IO_CAPABILITY_INVALID)
+ 		io_cap = IO_CAPABILITY_NOINPUTNOOUTPUT;
++#endif
+ 
+ 	memset(&cp, 0, sizeof(cp));
+ 	cp.io_capability = io_cap;

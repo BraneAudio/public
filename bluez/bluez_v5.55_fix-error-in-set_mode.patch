@@ -1,0 +1,40 @@
+diff --git a/src/adapter.c b/src/adapter.c
+index 1435e2bd7..32eb4b221 100644
+--- a/src/adapter.c
++++ b/src/adapter.c
+@@ -634,7 +634,7 @@ static bool set_mode(struct btd_adapter *adapter, uint16_t opcode,
+ 	memset(&cp, 0, sizeof(cp));
+ 	cp.val = mode;
+ 
+-	switch (mode) {
++	switch (opcode) {
+ 	case MGMT_OP_SET_POWERED:
+ 		setting = MGMT_SETTING_POWERED;
+ 		break;
+@@ -648,7 +648,25 @@ static bool set_mode(struct btd_adapter *adapter, uint16_t opcode,
+ 		setting = MGMT_SETTING_DISCOVERABLE;
+ 		break;
+ 	case MGMT_OP_SET_BONDABLE:
+-		setting = MGMT_SETTING_DISCOVERABLE;
++		setting = MGMT_SETTING_BONDABLE;
++		break;
++
++	// BRANE added everything from here on down
++	// not sure why these were not supported (they are used)
++	case MGMT_OP_SET_SSP:
++		setting = MGMT_SETTING_SSP;
++		break;
++	case MGMT_OP_SET_LE:
++		setting = MGMT_SETTING_LE;
++		break;
++	case MGMT_OP_SET_BREDR:
++		setting = MGMT_SETTING_BREDR;
++		break;
++	case MGMT_OP_SET_SECURE_CONN:
++		setting = MGMT_SETTING_SECURE_CONN;
++		break;
++	default:
++		btd_error(adapter->dev_id, "!!! UNKNOWN OPCODE !!!");
+ 		break;
+ 	}
+ 
